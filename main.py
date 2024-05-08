@@ -14,6 +14,16 @@ def find_duplicates(lst):
     return False
 
 
+def find_max_photo(photos):
+    def get_type_order(photo):
+        type_sequence = {'s': 1, 'm': 2, 'x': 3, 'o': 4, 'p': 5, 'q': 6, 'r': 7, 'y': 8, 'z': 9, 'w': 10}
+        return type_sequence.get(photo.get('type'), 0)
+
+    max_photo = sorted(photos, key=get_type_order)
+
+    return max_photo[-1]
+
+
 def get_vk_photos(user_id, access_token):
     params_vk = {
         'access_token': access_token,
@@ -33,7 +43,7 @@ def get_vk_photos(user_id, access_token):
     for i in total:
         likes.append(str(i['likes']['count']))
         dates.append(datetime.datetime.fromtimestamp(i['date']).strftime("%d.%m.%Y"))
-        urls.append(max(i['sizes'], key=lambda x: x['height'] + x['width']))
+        urls.append(find_max_photo(i['sizes']))
     if find_duplicates(likes):
         for i in find_duplicates(likes):
             likes[i] += f' {dates[i]}'
@@ -47,16 +57,25 @@ def check_vk_errors(func):
         return False, f'Error - error_msg: {func["error"]["error_msg"]}, error_code: {func["error"]["error_code"]}'
 
 
-def upload_to_yandex_disk(photos, yandex_token):
+def count_photos(photos):
+    count = 0
+    for i in list(photos.keys()):
+        count += 1
+    return count
+
+
+def upload_to_yandex_disk(photos, yandex_token, count):
     upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
     folder_url = 'https://cloud-api.yandex.net/v1/disk/resources'
     headers = {
         'Authorization': f'OAuth {yandex_token}'
     }
     responses = []
+    ssort = []
     check = None
     requests.put(folder_url, headers=headers, params={'path': 'vk_photos'})
-    for i in list(photos.keys()):
+    sorted_photos = list(photos.keys())[:count]
+    for i in sorted_photos:
         response_upload = requests.post(upload_url, headers=headers,
                                         params={'path': f'vk_photos/{i}', 'url': photos[i]['url']})
         if response_upload.status_code == 202:
@@ -74,7 +93,8 @@ def get_logs(responses):
         json.dump(responses[1], file, indent=4)
 
 
-def main(vk_token):
+def main():
+    vk_token = 'vk_token'
     yandex_token = input('Yandex token:')
     user_id = input('User id:')
 
@@ -93,20 +113,34 @@ def main(vk_token):
 
     print('Загрузка фотографий на яндекс диск...')
 
-    logs = upload_to_yandex_disk(photos_info, yandex_token)
+    number_of_photos = count_photos(photos_info)
 
-    if logs[0]:
-        print('Успешно загружено, проверяйте!')
+    count = int(input(f'К выгрузке готово {number_of_photos} фотографий, сколько фотографий выгрузить?\n'))
+
+    if count != 0:
+        count += 1
+
+    if count <= number_of_photos:
+
+        print('Загружаем!')
+
+        logs = upload_to_yandex_disk(photos_info, yandex_token, count)
+
+        if logs[0]:
+            print('Успешно загружено, проверяйте!')
+        else:
+            print('Ошибка')
+
+        print('Запись логов в файл...')
+
+        get_logs(logs)
+
+        print('Готово!')
+
     else:
-        print('Ошибка')
-
-    print('Запись логов в файл...')
-
-    get_logs(logs)
-
-    print('Готово!')
+        print(
+            f'Указанное количество фотографий больше существующего.\nСуществующее количество: {number_of_photos}\nПопробуйте еще раз')
 
 
-# нужно передать токен от вк
 if __name__ == '__main__':
-    main('vk_token')
+    main()
