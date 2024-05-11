@@ -24,13 +24,27 @@ def find_max_photo(photos):
     return max_photo[-1]
 
 
-def get_vk_photos(user_id, access_token):
+def get_count_photos(user_id, access_token, album):
     params_vk = {
         'access_token': access_token,
         'v': '5.199',
         'user_id': user_id,
-        'album_id': 'profile',
+        'album_id': album,
         'extended': 1
+    }
+    response_vk = requests.get('https://api.vk.com/method/photos.get', params=params_vk)
+    count = response_vk.json()['response']['count']
+    return count
+
+
+def get_vk_photos(user_id, access_token, count, album):
+    params_vk = {
+        'access_token': access_token,
+        'v': '5.199',
+        'user_id': user_id,
+        'album_id': album,
+        'extended': 1,
+        'count': count
     }
     likes = []
     urls = []
@@ -57,27 +71,20 @@ def check_vk_errors(func):
         return False, f'Error - error_msg: {func["error"]["error_msg"]}, error_code: {func["error"]["error_code"]}'
 
 
-def count_photos(photos):
-    count = 0
-    for i in list(photos.keys()):
-        count += 1
-    return count
-
-
-def upload_to_yandex_disk(photos, yandex_token, count):
+def upload_to_yandex_disk(photos, yandex_token, folder_name):
     upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
     folder_url = 'https://cloud-api.yandex.net/v1/disk/resources'
     headers = {
         'Authorization': f'OAuth {yandex_token}'
     }
     responses = []
-    ssort = []
     check = None
-    requests.put(folder_url, headers=headers, params={'path': 'vk_photos'})
-    sorted_photos = list(photos.keys())[:count]
-    for i in sorted_photos:
+    response_check = requests.get(folder_url, headers=headers, params={'path': folder_name})
+    if response_check.status_code == 404:
+        requests.put(folder_url, headers=headers, params={'path': folder_name})
+    for i in list(photos.keys()):
         response_upload = requests.post(upload_url, headers=headers,
-                                        params={'path': f'vk_photos/{i}', 'url': photos[i]['url']})
+                                        params={'path': f'{folder_name}/{i}', 'url': photos[i]['url']})
         if response_upload.status_code == 202:
             responses.append({'file_name': f'{i}.jpg', 'size': photos[i]['type']})
             check = True
@@ -99,9 +106,36 @@ def main():
     user_id = input('User id:')
 
     print('Получена инфомация!')
+
+    album_total = int(
+        input('Выберите альбом из которого будут выгружаться:\n1 - Фотографии со стены\n2 - Фотографии из профиля\n'))
+
+    if album_total == 1:
+        album_id = 'wall'
+    elif album_total == 2:
+        album_id = 'profile'
+    else:
+        print(f'Неправильное значение альбома, либо 1 либо 2. Вы указали {album_total}')
+        return
+
+    number_of_photos = get_count_photos(user_id, vk_token, album_id)
+
+    if number_of_photos <= 0:
+        print('0 фотографий в этом альбоме, выберите другой')
+        return
+
+    count = int(input(f'К выгрузке готово {number_of_photos} фотографий, сколько фотографий выгрузить?\n'))
+
+    if count < 1:
+        print('Количество фотографий меньше 1, попробуйте еще раз')
+        return
+    elif count > number_of_photos:
+        print('Количество фотографий больше возможного, попробуйте еще раз')
+        return
+
     print('Получение ответа с сервера vk...')
 
-    photos_info = get_vk_photos(user_id, vk_token)
+    photos_info = get_vk_photos(user_id, vk_token, count, album_id)
 
     check_errors = check_vk_errors(photos_info)
 
@@ -113,33 +147,22 @@ def main():
 
     print('Загрузка фотографий на яндекс диск...')
 
-    number_of_photos = count_photos(photos_info)
+    folder = input('Введите название папки в которую будут загружены фотографии:\n')
 
-    count = int(input(f'К выгрузке готово {number_of_photos} фотографий, сколько фотографий выгрузить?\n'))
+    print('Загружаем!')
 
-    if count != 0:
-        count += 1
+    logs = upload_to_yandex_disk(photos_info, yandex_token, folder)
 
-    if count <= number_of_photos:
-
-        print('Загружаем!')
-
-        logs = upload_to_yandex_disk(photos_info, yandex_token, count)
-
-        if logs[0]:
-            print('Успешно загружено, проверяйте!')
-        else:
-            print('Ошибка')
-
-        print('Запись логов в файл...')
-
-        get_logs(logs)
-
-        print('Готово!')
-
+    if logs[0]:
+        print('Успешно загружено, проверяйте!')
     else:
-        print(
-            f'Указанное количество фотографий больше существующего.\nСуществующее количество: {number_of_photos}\nПопробуйте еще раз')
+        print('Ошибка')
+
+    print('Запись логов в файл...')
+
+    get_logs(logs)
+
+    print('Готово!')
 
 
 if __name__ == '__main__':
